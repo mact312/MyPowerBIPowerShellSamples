@@ -7,7 +7,7 @@
 # RESOURCES:
 #   Get-PowerBIDataSetID: https://docs.microsoft.com/en-us/powershell/module/microsoftpowerbimgmt.data/get-powerbidataset?view=powerbi-ps
 #   Connect-PowerBIServiceAccount: https://docs.microsoft.com/en-us/powershell/module/microsoftpowerbimgmt.profile/connect-powerbiserviceaccount?view=powerbi-ps
-#
+#   You will need the PowerBIMgmt Module to make this work.  If you do not have it setup, you can install them with the following: Install-Module -Name MicrosoftPowerBIMgmt
 # CREATION DATE: June 21, 2019 - Tim Macaulay (timmac@microsoft.com)
 #####################################################################################################
 
