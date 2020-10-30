@@ -1,0 +1,121 @@
+
+## Creating this variable to help easily navigate the script based on the environment as certain things change based on environment
+## Update based on your environment
+## > Public = This is default if Environment is not specified during Login-PowerBIServiceAccount
+## > USGOV = GCC
+## > USGOVHIGH = GCC HIGH
+## > USGOVMIL = GCC MIL
+$YourEnvironment = "USGOV"
+
+#Region_UpdateFile
+# UpdateDataFile is a function that writes a CSV file to store the data
+Function UpdateDataFile{
+    Param(
+        [psobject]$Get_UpdateDataObject
+    )
+    Process{
+        
+        $BuildFileName = 'C:\Temp\PowerBIReportDump_' + (Get-Date).Year.ToString() + (Get-Date).Month.ToString() + '.csv'
+        $Get_UpdateDataObject | Export-Csv $BuildFileName -Append    
+    }
+}
+#EndRegion
+
+#Region_UpdateEnvironmentAPI
+# Function to set variables to utilize based on the environment
+Function UpdateEnvironmentAPI{
+    Param(
+        [string]$GetYourEnvironment
+    )
+    Process{
+        switch ($GetYourEnvironment.ToLower()) {
+            "public" { "https://api.powerbi.com" }
+            "usgov" { "https://api.powerbigov.us" }
+            "usgovhigh" { "https://api.high.powerbigov.us" }
+            Default {}
+        }
+    }
+}
+#EndRegion
+
+# Login to Power BI
+Login-PowerBIServiceAccount -Credential $UserCredential -Environment $YourEnvironment
+# Set the URL for the Environment
+$EnvironmentAPI = UpdateEnvironmentAPI -GetYourEnvironment $YourEnvironment
+
+
+
+#region workspaceinformation
+#1 : Let's collect all the Power BI Workspaces on the Power BI Tenant 
+#2 : You cannot do anything inside of a PersonalGroup.  This is a My Workspace and is attached to a single Azure AD User Account
+Write-Output "Obtaining List of all Active Workspaces...Excluding My Workspaces"
+$GetWorkspaces = Get-PowerBIWorkspace -Scope Organization -All | Where-Object {$_.Type -ne 'PersonalGroup' -and $_.State -eq 'Active' }
+$Workspace_Count = $GetWorkspaces.Count.ToString() + " Power BI Workspaces have been collected!"
+Write-Output $Workspace_Count
+#endregion
+
+# Next step is to loop through each of the Power BI Workspaces
+Write-Output "Looping through Power BI Workspaces Gathered..."
+$GetWorkspaces | ForEach-Object{
+    $CurrentWorkspaceObject = $_
+
+    #Build out workspace related variables
+    $gWorkSpaceID = $CurrentWorkspaceObject.Id
+    $gWorkSpaceName = $CurrentWorkspaceObject.Name.ToUpper()
+    $gWorkSpaceNameID = $gWorkSpaceName + "(" + $gWorkSpaceID + ")"
+    $gWorkSpaceType = $CurrentWorkspaceObject.Type
+    $gWorkSpaceDedicatedCapacity = $CurrentWorkspaceObject.IsOnDedicatedCapacity
+    $gWorkSpaceCapacityID = $CurrentWorkspaceObject.CapacityId
+
+    # Gov't Clusters do not have the ability to run the Admin APIs as of 10/2020
+    # Because of this, the user executing the script must be a Workspace Admin of all of the Power BI Workspaces
+    # The script will be working with to collect the Power BI Reports
+    $CollectReportsInWorkspace = "Collecting the Power BI Reports in the Power BI Workspace - " + $gWorkSpaceName
+    Write-Output $CollectReportsInWorkspace
+    $Get_ReportURL = $EnvironmentAPI + "/v1.0/myorg/groups/" + $gWorkSpaceID + "/reports"
+    $Get_ReportsInWorkSpace = Invoke-PowerBIRestMethod -Url $Get_ReportURL -Method Get
+    $GetReportCount = $Get_ReportURL.Count.ToString() + " - Power BI Reports in Power BI Workspace - " + $gWorkSpaceName
+    Write-Output $GetReportCount
+
+    foreach($ReportItem in $Get_ReportsInWorkSpace)
+    {
+        $WorkSpaceObject = New-Object PSObject
+        # Power BI Workspace Information
+        $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Workspace Name" -Value $gWorkSpaceName
+        $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Workspace ID" -Value $gWorkSpaceID
+        $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Workspace Type" -Value $gWorkSpaceType
+        $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Workspace On Dedicated" -Value $gWorkSpaceDedicatedCapacity
+        $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Capacity ID" -Value $gWorkSpaceCapacityID
+        
+        $ReportItem_Names = ($ReportItem | ConvertFrom-Json).value
+
+        if($ReportItem_Names.Count -gt 1){
+            foreach($ItemName in $ReportItem_Names)
+            {
+                #Report Information                
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Name" -Value $ItemName.name -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report ID" -Value $ItemName.id -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report WebUrl" -Value $ItemName.webUrl -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report EmbedUrl" -Value $ItemName.embedUrl -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Created DateTime" -Value $ItemName.createdDateTime -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Created By" -Value $ItemName.createdBy -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Modified DateTime" -Value $ItemName.modifiedDateTime -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Modified By" -Value $ItemName.modifiedBy -Force
+                $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Dataset ID" -Value $ItemName.datasetId -Force
+                UpdateDataFile($WorkSpaceObject)
+            }
+        }
+        else{
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Name" -Value ($ReportItem | ConvertFrom-Json).value.name
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report ID" -Value ($ReportItem | ConvertFrom-Json).value.id
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report WebUrl" -Value ($ReportItem | ConvertFrom-Json).value.webUrl
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report EmbedUrl" -Value ($ReportItem | ConvertFrom-Json).value.embedUrl
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Created DateTime" -Value ($ReportItem | ConvertFrom-Json).value.createdDateTime
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Created By" -Value ($ReportItem | ConvertFrom-Json).value.createdBy
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Modified DateTime" -Value ($ReportItem | ConvertFrom-Json).value.modifiedDateTime
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Modified By" -Value ($ReportItem | ConvertFrom-Json).value.modifiedBy
+            $WorkSpaceObject | Add-Member -MemberType NoteProperty -Name "Report Dataset ID" -Value ($ReportItem | ConvertFrom-Json).value.datasetId
+            UpdateDataFile($WorkSpaceObject)
+        }
+    }
+    }
